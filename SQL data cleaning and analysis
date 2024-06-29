@@ -1,0 +1,306 @@
+# MySQL Project: data cleaning and analysis
+
+## Project Description
+Importing world layoffs data set from gitbhub and cleaned and then modifed to achieve resuilts and insights.
+
+-- Data Clayoffs_rawleaning Project 
+
+
+ -- raw data 
+SELECT * 
+FROM world_layoffs.layoffs_raw;
+
+-- step 1 remove duplicates 
+-- step 2 standardize data, make consistent
+-- step 3 null values or blank values
+-- step 4 remove rows and columns that arent necessary
+
+-- create a table to edit data
+CREATE TABLE layoffs_staging
+LIKE world_layoffs.layoffs_raw;
+
+INSERT layoffs_staging 
+SELECT * 
+FROM layoffs_raw;
+
+-- DELETE DUPLICATES 
+WITH duplicate_cte AS
+(
+SELECT *,
+-- use row number so duplicates get labelled 2 and higher 
+ROW_NUMBER() OVER(
+PARTITION BY company,location,industry,total_laid_off,
+percentage_laid_off,`date`,stage,country,funds_raised_millions) AS row_num
+FROM layoffs_staging
+)
+SELECT *
+FROM duplicate_cte
+WHERE row_num >1;
+
+-- CAN'T DELETE FROM CTE
+-- creating another table to delete 
+CREATE TABLE `layoffs_staging2` (
+  `company` text,
+  `location` text,
+  `industry` text,
+  `total_laid_off` int DEFAULT NULL,
+  `percentage_laid_off` text,
+  `date` text,
+  `stage` text,
+  `country` text,
+  `funds_raised_millions` int DEFAULT NULL,
+  `row_num` INT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+INSERT INTO layoffs_staging2
+SELECT *,
+ROW_NUMBER() OVER(
+PARTITION BY company,location,industry,total_laid_off,
+percentage_laid_off,`date`,stage,country,funds_raised_millions) AS row_num
+FROM layoffs_staging;
+
+DELETE
+FROM layoffs_staging2
+WHERE row_num >1;
+
+-- finished deleting duplicates
+
+
+-- STANDARDIZING DATA
+ 
+ -- trim removes space character by default and other characters when specified from start or end 
+ 
+ SELECT company, TRIM(company)
+ FROM layoffs_staging2;
+ 
+ UPDATE layoffs_staging2
+ SET company = TRIM(company);
+ 
+ 
+ SELECT DISTINCT industry
+ FROM layoffs_staging2
+ ORDER BY 1;
+ 
+ 
+ SELECT *
+ FROM layoffs_staging2
+ WHERE industry LIKE 'crypt%';
+ 
+ UPDATE layoffs_staging2
+ SET industry = 'Crypto'
+ WHERE industry LIKE 'crypt%';
+ 
+ -- don't need trailing but put it in 
+ -- by default trim does both sides 
+ SELECT DISTINCT country, TRIM(TRAILING '.'  FROM country)
+ FROM layoffs_staging2
+ ORDER BY 1;
+ 
+ 
+ UPDATE layoffs_staging2
+ SET country = TRIM(TRAILING '.'  FROM country)
+ WHERE country LIKE 'United States%';
+ 
+ -- changing date column to date instead of text 
+ SELECT `date`,
+ str_to_date(`date`,'%m/%d/%Y')
+ FROM layoffs_staging2;
+ 
+ UPDATE layoffs_staging2
+ SET `date` = str_to_date(`date`,'%m/%d/%Y');
+ 
+ ALTER TABLE layoffs_staging2
+ MODIFY COLUMN `date` DATE;
+ 
+ 
+ SELECT *
+ FROM layoffs_staging2;
+ 
+ 
+ -- working with nulls 
+ SELECT *
+ FROM layoffs_staging2
+ WHERE total_laid_off IS NULL;
+ 
+ SELECT *
+ FROM layoffs_staging2
+ WHERE industry IS NULL OR industry = '';
+ 
+ 
+ SELECT *
+ FROM layoffs_staging2
+ WHERE company = 'Airbnb';
+ 
+-- changing blanks to nulls
+UPDATE layoffs_staging2
+SET industry = null
+WHERE industry = ''; 
+
+ 
+ SELECT t1.industry,t2.industry
+ FROM layoffs_staging2 as t1
+ JOIN layoffs_staging2 as t2
+	ON t1.company = t2.company 
+    AND t1.location = t2.location
+WHERE (t1.industry IS NULL OR t1.industry = '')
+AND t2.industry IS NOT NULL;
+ 
+ -- changing the industry  if another row with same company has industry 
+ UPDATE layoffs_staging2 as t1
+ JOIN layoffs_staging2 as t2
+	ON t1.company = t2.company 
+ SET t1.industry = t2.industry
+ WHERE (t1.industry IS NULL)
+AND t2.industry IS NOT NULL;
+
+
+ -- this one didn't have another row with an industry 
+ SELECT *
+ FROM layoffs_staging2
+ WHERE company =  'Bally''s Interactive';
+
+
+
+-- remove unnecessary rows
+SELECT *
+FROM layoffs_staging2
+WHERE total_laid_off IS NULL 
+AND percentage_laid_off IS NULL;
+
+DELETE
+FROM layoffs_staging2
+WHERE total_laid_off IS NULL 
+AND percentage_laid_off IS NULL;
+
+
+SELECT * 
+FROM layoffs_staging2;
+
+ALTER TABLE layoffs_staging2
+DROP COLUMN row_num;
+
+-- DATA ANALYSIS
+
+-- lost all employees
+SELECT *
+FROM layoffs_staging2
+WHERE percentage_laid_off = 1
+ORDER BY total_laid_off DESC;
+
+SELECT *
+FROM layoffs_staging2
+WHERE percentage_laid_off = 1
+ORDER BY funds_raised_millions DESC;
+
+SELECT company, SUM(total_laid_off)
+FROM layoffs_staging2
+GROUP BY company
+ORDER BY 2 DESC;
+
+SELECT MIN(`date`),MAX(`date`)
+FROM layoffs_staging2;
+
+-- amount laid off for each industry 
+SELECT industry,country, SUM(total_laid_off)
+FROM layoffs_staging2
+GROUP BY 2,1
+ORDER BY 3 DESC;
+
+-- amount laid off each day 
+SELECT `date`, SUM(total_laid_off)
+FROM layoffs_staging2
+GROUP BY 1
+ORDER BY 1 DESC;
+
+-- average percentage of people laid off per copany 
+SELECT company, AVG(percentage_laid_off)
+FROM layoffs_staging2
+GROUP BY 1
+ORDER BY 2 DESC;
+
+
+-- AMOUNT LAID OFF FOR EACH MONTH 
+SELECT SUBSTRING(`date`,1,7) AS MONTH,SUM(total_laid_off)
+FROM layoffs_staging2
+WHERE SUBSTRING(`date`,1,7) IS NOT NULL
+GROUP BY `MONTH`
+ORDER BY `MONTH`;
+
+-- ROLLING TOTAL BY MONTH 
+WITH Rolling_Total AS 
+(
+SELECT SUBSTRING(`date`,1,7) AS `MONTH`,SUM(total_laid_off) AS total_off
+FROM layoffs_staging2
+WHERE SUBSTRING(`date`,1,7) IS NOT NULL
+GROUP BY `MONTH`
+ORDER BY `MONTH`
+)
+SELECT `MONTH`,total_off, SUM(total_off) OVER(ORDER BY `MONTH`) AS rolling_total
+FROM Rolling_Total; 
+
+-- RESET COUNT AFTER EACH  year 
+WITH Rolling_Total AS 
+(
+SELECT SUBSTRING(`date`,1,7) AS `MONTH`,SUM(total_laid_off) AS total_off
+FROM layoffs_staging2
+WHERE SUBSTRING(`date`,1,7) IS NOT NULL
+GROUP BY `MONTH`
+ORDER BY `MONTH`
+)
+SELECT `MONTH`,total_off, SUM(total_off) OVER(PARTITION BY SUBstring(`MONTH`,1,4) ORDER BY `MONTH`) AS rolling_total
+FROM Rolling_Total;
+
+-- amount laid off each year 
+SELECT YEAR(`date`) AS `YEAR`, SUM(total_laid_off) AS Amount_Laid_off,
+DENSE_RANK() OVER(ORDER BY SUM(total_laid_off)) AS `Rank`
+FROM layoffs_staging2
+WHERE YEAR(`date`) IS NOT NULL
+GROUP BY 1
+ORDER BY 3 ASC;
+
+
+
+-- ROLLING TOTAL BY YEAR 
+WITH Rolling_total_year (`YEAR`,Total) AS 
+(
+SELECT SUBSTRING(`date`,1,4) AS `YEAR` ,SUM(total_laid_off)
+FROM layoffs_staging2
+WHERE SUBSTRING(`date`,1,4) IS NOT NULL
+GROUP BY `YEAR`
+ORDER BY 2 DESC
+)
+SELECT *,SUM(Total) OVER(ORDER BY `YEAR`) AS rolling_total
+FROM Rolling_total_year;
+
+
+-- total laid off by company 
+SELECT company,SUM(total_laid_off)
+FROM layoffs_staging2
+GROUP BY company
+ORDER BY 2 DESC;
+
+-- FOR EACH COMPANY AMOUNT LAID OFF PER YEAR 
+-- RANKED BY AMOUNT LIAD OFF
+WITH Top_five_layoffs_amounts AS
+(
+WITH yearly_layoffs (Company,`YEAR`,Total_Layoff) AS 
+(
+SELECT company,SUBSTRING(`date`,1,4),SUM(total_laid_off)
+FROM layoffs_staging2
+WHERE SUBSTRING(`date`,1,4) IS NOT NULL
+GROUP BY 1,2
+ORDER BY 3 DESC
+)
+SELECT *,
+-- ROW NUMBER GOES 1-5 
+-- USE RANK() FOR DOUBLING IF SAME THEN SKIPPING NEXT RANK EX 1 2 3 4 4 6
+-- USE DENSE_RANK() FOR DOUBLING AND NOT SKIPPING EX 1 2 3 4 4 5
+row_number() OVER(PARTITION BY `YEAR` ORDER BY Total_layoff DESC) AS `Rank`
+FROM yearly_layoffs
+WHERE Total_Layoff IS NOT NULL
+ORDER BY `Rank`
+)
+SELECT *
+FROM Top_five_layoffs_amounts
+WHERE `Rank` <6
+ORDER BY `YEAR`;
