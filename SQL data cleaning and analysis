@@ -1,10 +1,7 @@
 # MySQL Project: data cleaning and analysis
 
 ## Project Description
-Importing world layoffs data set from gitbhub and cleaned and then modifed to achieve resuilts and insights.
-
--- Data Clayoffs_rawleaning Project 
-
+-- Importing world layoffs data set from gitbhub and cleaned and then modifed to achieve resuilts and insights.
 
  -- raw data 
 SELECT * 
